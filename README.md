@@ -1,4 +1,4 @@
-# Fitness
+# bestia
 
 Tracker personal de entrenos, comidas, peso y hábitos. Web estática (GitHub Pages) instalable como app.
 
