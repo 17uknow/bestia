@@ -444,8 +444,9 @@
   function viewEntreno() {
     const nr = nextRoutine();
     const place = ui.place || nr.place;
+    const sel = ui.rid || nr.rid;
     const w = weekOf(today());
-    const cards = ['A', 'B'].map(rid => {
+    const cards = [sel].map(rid => {
       const key = `${rid}-${place}`, r = routine(key);
       const list = r.items.map((it, i) => `<li><span>${esc(EXERCISES[it.ex].n)}</span><small class="mono">${it.sets}×${it.time ? `${it.time[0]}-${it.time[1]}s` : it.fail ? 'fallo' : `${it.reps[0]}${it.reps[1] !== it.reps[0] ? '-' + it.reps[1] : ''}`}${it.ss ? ' ⟶' : ''}</small></li>`).join('');
       return `<section class="card glass ${nr.rid === rid ? 'next' : ''}">
@@ -462,7 +463,8 @@
     const lib = Object.entries(EXERCISES).map(([id, e]) => `<button class="row" data-a="sheet" data-s="exercise" data-ex="${id}"><div>${esc(e.n)}<br><small class="muted">${e.p.map(m => MUSCLE_NAMES[m]).join(', ')}</small></div>${ICON.info}</button>`).join('');
     return `
       <header class="phead"><h1>Entrenar</h1><small class="muted">${w ? `Semana ${w}${w <= 2 ? ' · aprendizaje (RIR 3-4)' : ' · RIR 1-2'}` : 'Tu primer entreno marcará el inicio de la semana 1'}</small></header>
-      <div class="segs big glass">${['gym', 'casa'].map(p => `<button class="seg ${place === p ? 'on' : ''}" data-a="place" data-p="${p}">${p === 'gym' ? 'Gimnasio' : 'Casa'}</button>`).join('')}</div>
+      <div class="segs big glass">${['gym', 'casa'].map(p => `<button class="seg ${place === p ? 'on' : ''}" data-a="place" data-p="${p}">${p === 'gym' ? '🏋️ Gimnasio' : '🏠 Casa'}</button>`).join('')}</div>
+      <div class="segs big glass">${['A', 'B'].map(r => `<button class="seg ${sel === r ? 'on' : ''}" data-a="rid" data-r="${r}">Día ${r}${nr.rid === r ? ' · te toca' : ''}</button>`).join('')}</div>
       ${deloadDue(w) ? `<div class="banner glass">🔋 <div>Semana ${w}: si notas fatiga, esta semana baja un 20 % los pesos (descarga).</div><button class="chip" data-a="deload" data-w="${w}">Hacer descarga</button></div>` : ''}
       ${cards}
       ${hist ? `<section class="card glass"><div class="card-h"><h2>Historial</h2></div>${hist}</section>` : ''}
@@ -473,6 +475,9 @@
     const s = D().sessions[ui.sessionId];
     const w = weekOf(s.date) || 1;
     const dl = (D().settings.deloads || []).includes(w);
+    const started = Object.values(s.sets || {}).some(a => a.some(x => x.done));
+    const switches = started ? '' : `<div class="segs big glass">${['gym', 'casa'].map(p => `<button class="seg ${s.place === p ? 'on' : ''}" data-a="switchSession" data-place="${p}" data-rid="${s.rid}">${p === 'gym' ? '🏋️ Gimnasio' : '🏠 Casa'}</button>`).join('')}</div>
+      <div class="segs big glass">${['A', 'B'].map(r => `<button class="seg ${s.rid === r ? 'on' : ''}" data-a="switchSession" data-place="${s.place}" data-rid="${r}">Día ${r}</button>`).join('')}</div>`;
     const items = s.items.map((it, i) => {
       const ex = EXERCISES[it.ex];
       const sg = suggest(it, s.date, s.id);
@@ -501,6 +506,7 @@
     return `
       <header class="phead row0"><button class="ib glass" data-a="closeSession" aria-label="Volver">${ICON.left}</button>
         <div><h1>Día ${s.rid} <small class="muted">${s.place}</small></h1><small class="muted">${cap(fmtDay(s.date))} · semana ${w}${dl ? ' · descarga' : ''}</small></div></header>
+      ${switches}
       ${items}
       <button class="btn pri wide big" data-a="finishSession">${s.done ? 'Guardado ✓ · Volver' : 'Terminar entreno'}</button>
       <button class="btn ghost wide" data-a="deleteSession">Borrar esta sesión</button>`;
@@ -881,6 +887,15 @@
     selFood(el) { ui.sheet.sel = el.dataset.id; render(); const i = $('form[data-f=addFood] input'); if (i) i.focus(); },
     rmFood(el) { if (confirm('¿Borrar este alimento? Los registros que lo usen dejarán de contarlo.')) { S.remove('foods', el.dataset.id); render(); } },
     place(el) { ui.place = el.dataset.p; D().settings.place = el.dataset.p; S.touch('settings'); render(); },
+    rid(el) { ui.rid = el.dataset.r; render(); },
+    // Cambiar de día o de sitio antes de empezar a apuntar series
+    switchSession(el) {
+      const s = D().sessions[ui.sessionId];
+      s.rid = el.dataset.rid; s.place = el.dataset.place;
+      s.items = JSON.parse(JSON.stringify(routine(`${s.rid}-${s.place}`).items));
+      s.sets = {};
+      S.touch('sessions', s.id); render();
+    },
     startSession(el) {
       const rid = el.dataset.rid, place = el.dataset.place;
       const r = routine(`${rid}-${place}`);

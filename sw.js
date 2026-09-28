@@ -1,7 +1,7 @@
 // Service worker: la app funciona sin conexión (gym sin cobertura).
 // App: primero red y, si falla, caché (así siempre coges la última versión cuando hay internet).
 // Imágenes de ejercicios: primero caché. Dropbox: nunca se cachea.
-const VERSION = 'fit-v1';
+const VERSION = 'fit-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-180.png', './icon-512.png',
   './js/foods.js', './js/meals.js', './js/exercises.js', './js/routines.js', './js/muscles.js', './js/anim.js', './js/store.js', './js/app.js'];
 
