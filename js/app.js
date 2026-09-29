@@ -30,7 +30,7 @@
     const c = S.live('foods')[id];
     if (c) return { n: c.n, kcal: c.kcal, p: c.p, c: c.c, f: c.f, custom: true };
     const f = window.FOODS[id];
-    return f ? { n: f[0], kcal: f[1], p: f[2], c: f[3], f: f[4] } : null;
+    return f ? { n: f[0], kcal: f[1], p: f[2], c: f[3], f: f[4], r: f[5], warn: f[6], dish: window.DISH_IDS && DISH_IDS.has(id) } : null;
   }
   function macros(list) {
     const t = { kcal: 0, p: 0, c: 0, f: 0 };
@@ -48,7 +48,7 @@
     if (e.out) { const x = OUT_EST[slot][e.out]; return { kcal: x[0], p: x[1], c: x[2], f: x[3] }; }
     return macros(mealItems(e));
   }
-  const filled = e => e && (e.code || e.out);
+  const filled = e => e && (e.code || e.out || (e.free && e.extras && e.extras.length));
   function dayTotals(day) {
     const t = { kcal: 0, p: 0, c: 0, f: 0, slots: 0 };
     if (!day) return t;
@@ -393,7 +393,8 @@
       const e = day.meals[s.k];
       const m = filled(e) ? mealTotals(e, s.k) : null;
       const sug = plan && plan[s.k];
-      const title = e && e.out ? `Fuera / libre · ${e.out}` : e && e.code ? `<span class="code">${e.code}</span> ${esc(MEALS[e.code].n)}` : `<span class="muted">Sin registrar${sug ? ` · toca ${sug}` : ''}</span>`;
+      const freeName = e && e.free && e.extras && e.extras.length ? e.extras.map(x => { const f = food(x[0]); return f ? f.n : x[0]; }).join(' + ') : '';
+      const title = e && e.out ? `Fuera / libre · ${e.out}` : freeName ? esc(freeName) : e && e.code ? `<span class="code">${e.code}</span> ${esc(MEALS[e.code].n)}` : `<span class="muted">Sin registrar${sug ? ` · toca ${sug}` : ''}</span>`;
       const mods = e && e.code && ((e.extras && e.extras.length) || Object.keys(e.adj || {}).length) ? ' <span class="tag">ajustado</span>' : '';
       return `<button class="row slot" data-a="sheet" data-s="meal" data-k="${s.k}">
         <div class="slot-l"><small>${s.name}</small><div>${title}${mods}</div></div>
@@ -705,9 +706,18 @@
         <div class="btns"><button class="chip" data-a="sheet" data-s="food" data-target="meal" data-k="${k}">${ICON.plus} Añadir ingrediente</button>${Object.keys(adj).length ? `<button class="chip" data-a="resetAdj" data-k="${k}">Volver a las cantidades del plan</button>` : ''}</div>
         <p class="mono total">${num(t.kcal)} kcal · ${num(t.p)} P · ${num(t.c)} C · ${num(t.f)} G</p></div>`;
     }
+    if (e && e.free) {
+      const ex = (e.extras || []).map(([id, g], i) => { const f = food(id); return `<div class="ing"><span>${esc(f ? f.n : id)}${f && f.r ? ` <small class="muted">(ración ≈ ${f.r} g)</small>` : ''}</span><label class="fld"><input type="number" inputmode="numeric" step="5" min="0" data-in="mealExtra" data-k="${k}" data-i="${i}" value="${g}"><small>g</small></label><button class="ib" data-a="rmMealExtra" data-k="${k}" data-i="${i}" aria-label="Quitar">${ICON.trash}</button></div>`; }).join('');
+      const t = mealTotals(e, k);
+      detail = `<div class="card glass inner"><div class="card-h"><h3>Otro plato</h3></div>${ex || '<p class="small muted">Vacío.</p>'}
+        <div class="btns"><button class="chip" data-a="sheet" data-s="food" data-target="mealFree" data-k="${k}">${ICON.plus} Añadir más</button></div>
+        <p class="mono total">${num(t.kcal)} kcal · ${num(t.p)} P · ${num(t.c)} C · ${num(t.f)} G</p></div>`;
+    }
     const out = ['poco', 'normal', 'mucho'].map(o => { const x = OUT_EST[k][o]; return `<button class="opt ${e && e.out === o ? 'on' : ''}" data-a="pickOut" data-k="${k}" data-o="${o}"><span class="opt-n">${cap(o)}</span><small class="mono">~${x[0]} kcal · ${x[1]} g P</small></button>`; }).join('');
     return `<div class="sheet-h"><div><small class="muted">${cap(fmtDay(date))}</small><h2>${slot.name}</h2></div><button class="ib" data-a="closeSheet" aria-label="Cerrar">${ICON.close}</button></div>
       ${detail}
+      <h3 class="lbl">Otro plato o alimentos sueltos</h3>
+      <button class="btn ghost wide" data-a="sheet" data-s="food" data-target="mealFree" data-k="${k}">${ICON.plus} Tortilla, empanada, pulpo… (buscar)</button>
       <h3 class="lbl">Opciones del plan</h3><div class="opts">${opts}</div>
       <h3 class="lbl">Fuera / libre (estimación rápida)</h3><div class="opts three">${out}</div>
       <p class="small muted">Fuera: elige el plato con más proteína visible y remata con yogur griego, huevo cocido o batido si te falta.</p>
@@ -717,13 +727,17 @@
   function sheetFood(sh) {
     const q = (ui.foodQuery || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const all = Object.keys(FOODS).map(id => [id, food(id)]).concat(Object.keys(S.live('foods')).map(id => [id, food(id)]));
-    const list = all.filter(([, f]) => f && (!q || f.n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(q))).slice(0, 60);
+    const kind = ui.foodKind || (sh.target === 'mealFree' ? 'platos' : 'todo');
+    const list = all.filter(([id, f]) => f && (kind === 'todo' || (kind === 'platos') === !!f.dish) && (!q || f.n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').includes(q))).slice(0, 120);
     const sel = sh.sel;
-    return `<div class="sheet-h"><h2>Añadir ${sh.target === 'meal' ? 'ingrediente' : 'extra'}</h2><button class="ib" data-a="closeSheet" aria-label="Cerrar">${ICON.close}</button></div>
-      ${sel ? `<div class="card glass inner"><h3>${esc(food(sel).n)}</h3><form class="wform" data-f="addFood"><input name="g" type="number" inputmode="numeric" step="5" min="1" placeholder="gramos" autofocus><span>g</span><button class="btn pri">Añadir</button></form>
-        <p class="small muted mono">${food(sel).kcal} kcal · ${food(sel).p} g P por 100 g</p></div>` : ''}
+    const fs = sel ? food(sel) : null;
+    const title = sh.target === 'meal' ? 'Añadir ingrediente' : sh.target === 'mealFree' ? 'Otro plato' : 'Añadir extra';
+    return `<div class="sheet-h"><h2>${title}</h2><button class="ib" data-a="closeSheet" aria-label="Cerrar">${ICON.close}</button></div>
+      ${fs ? `<div class="card glass inner"><h3>${esc(fs.n)}</h3>${fs.warn ? `<p class="small err">⚠️ ${esc(fs.warn)}</p>` : ''}<form class="wform" data-f="addFood"><input name="g" type="number" inputmode="decimal" step="any" min="0.1" placeholder="gramos" value="${fs.r || ''}" autofocus><span>g</span><button class="btn pri">Añadir</button></form>
+        <p class="small muted mono">${fs.kcal} kcal · ${fs.p} P · ${fs.c} C · ${fs.f} G por 100 g${fs.r ? ` · ración típica ≈ ${fs.r} g (${num(fs.kcal * fs.r / 100)} kcal, ${num(fs.p * fs.r / 100)} g P)` : ''}</p></div>` : ''}
+      <div class="segs">${[['todo', 'Todo'], ['platos', 'Platos'], ['ing', 'Ingredientes']].map(([v, l]) => `<button class="seg ${kind === v ? 'on' : ''}" data-a="foodKind" data-v="${v}">${l}</button>`).join('')}</div>
       <input class="search" type="search" placeholder="Buscar alimento…" data-in="foodQuery" value="${esc(ui.foodQuery || '')}">
-      <div class="flist">${list.map(([id, f]) => `<button class="row ${sel === id ? 'on' : ''}" data-a="selFood" data-id="${id}"><span>${esc(f.n)}${f.custom ? ' <span class="tag">mío</span>' : ''}</span><small class="mono muted">${f.kcal} kcal · ${f.p} P</small></button>`).join('') || '<p class="muted small">Nada. Créalo en Ajustes → Mis alimentos.</p>'}</div>
+      <div class="flist">${list.map(([id, f]) => `<button class="row ${sel === id ? 'on' : ''}" data-a="selFood" data-id="${id}"><span>${esc(f.n)}${f.custom ? ' <span class="tag">mío</span>' : ''}${f.dish ? ' <span class="tag">plato</span>' : ''}</span><small class="mono muted">${f.kcal} kcal · ${f.p} P</small></button>`).join('') || '<p class="muted small">Nada. Créalo en Ajustes → Mis alimentos.</p>'}</div>
       <button class="btn ghost wide" data-a="sheet" data-s="newFood" data-back="1">${ICON.plus} Crear alimento nuevo</button>`;
   }
 
@@ -732,10 +746,10 @@
       <p class="small muted">Copia los datos de la etiqueta (por 100 g o 100 ml). Vigila que no lleve frutos secos.</p>
       <form class="form" data-f="newFood">
         <label class="frow"><span>Nombre</span><input name="n" required></label>
-        <label class="frow"><span>Calorías</span><input name="kcal" type="number" step="1" inputmode="decimal" required></label>
-        <label class="frow"><span>Proteína (g)</span><input name="p" type="number" step="0.1" inputmode="decimal" required></label>
-        <label class="frow"><span>Carbohidratos (g)</span><input name="c" type="number" step="0.1" inputmode="decimal" required></label>
-        <label class="frow"><span>Grasa (g)</span><input name="f" type="number" step="0.1" inputmode="decimal" required></label>
+        <label class="frow"><span>Calorías</span><input name="kcal" type="number" step="any" inputmode="decimal" required></label>
+        <label class="frow"><span>Proteína (g)</span><input name="p" type="number" step="any" inputmode="decimal" required></label>
+        <label class="frow"><span>Carbohidratos (g)</span><input name="c" type="number" step="any" inputmode="decimal" required></label>
+        <label class="frow"><span>Grasa (g)</span><input name="f" type="number" step="any" inputmode="decimal" required></label>
         <button class="btn pri wide">Guardar</button></form>`;
   }
 
@@ -796,8 +810,8 @@
         <label class="frow"><span>Series</span><input name="sets" type="number" min="1" max="8" value="${it.sets}"></label>
         <label class="frow"><span>${it.time ? 'Segundos mín.' : 'Reps mín.'}</span><input name="lo" type="number" min="1" value="${r[0]}"></label>
         <label class="frow"><span>${it.time ? 'Segundos máx.' : 'Reps máx.'}</span><input name="hi" type="number" min="1" value="${r[1]}"></label>
-        <label class="frow"><span>Descanso mín. (s)</span><input name="r0" type="number" min="0" step="15" value="${it.rest[0]}"></label>
-        <label class="frow"><span>Descanso máx. (s)</span><input name="r1" type="number" min="0" step="15" value="${it.rest[1]}"></label>
+        <label class="frow"><span>Descanso mín. (s)</span><input name="r0" type="number" min="0" step="5" value="${it.rest[0]}"></label>
+        <label class="frow"><span>Descanso máx. (s)</span><input name="r1" type="number" min="0" step="5" value="${it.rest[1]}"></label>
         <label class="frow"><span>Guardar en la rutina</span><input name="keep" type="checkbox" checked></label>
         <button class="btn pri wide">Guardar</button></form>`;
   }
@@ -864,7 +878,7 @@
     },
     sheet(el) {
       const d = el.dataset;
-      if (d.s === 'food') ui.foodQuery = '';
+      if (d.s === 'food') { ui.foodQuery = ''; ui.foodKind = null; }
       if (d.s === 'exercise') ui.mediaTab = ui.mediaTab || 'fotos';
       const prev = ui.sheet;
       ui.sheet = { s: d.s, k: d.k, ex: d.ex, i: d.i != null ? +d.i : undefined, target: d.target, back: d.back ? prev : null };
@@ -884,6 +898,7 @@
     resetAdj(el) { const day = getDay(ui.date, true); const e = day.meals[el.dataset.k]; e.adj = {}; saveDay(ui.date); },
     rmMealExtra(el) { const day = getDay(ui.date, true); day.meals[el.dataset.k].extras.splice(+el.dataset.i, 1); saveDay(ui.date); },
     rmExtra(el) { const day = getDay(ui.date, true); day.extras.splice(+el.dataset.i, 1); saveDay(ui.date); },
+    foodKind(el) { ui.foodKind = el.dataset.v; renderSheet(); },
     selFood(el) { ui.sheet.sel = el.dataset.id; render(); const i = $('form[data-f=addFood] input'); if (i) i.focus(); },
     rmFood(el) { if (confirm('¿Borrar este alimento? Los registros que lo usen dejarán de contarlo.')) { S.remove('foods', el.dataset.id); render(); } },
     place(el) { ui.place = el.dataset.p; D().settings.place = el.dataset.p; S.touch('settings'); render(); },
@@ -980,7 +995,11 @@
       const g = toNum(f.g.value); if (!g) return;
       const id = ui.sheet.sel;
       const day = getDay(ui.date, true);
-      if (ui.sheet.target === 'meal') { const e = day.meals[ui.sheet.k]; (e.extras = e.extras || []).push([id, g]); ui.sheet = ui.sheet.back || { s: 'meal', k: ui.sheet.k }; }
+      if (ui.sheet.target === 'mealFree') {
+        const k = ui.sheet.k; let e = day.meals[k];
+        if (!e || !e.free) e = day.meals[k] = { free: true, extras: [] };
+        e.extras.push([id, g]); ui.sheet = { s: 'meal', k };
+      } else if (ui.sheet.target === 'meal') { const e = day.meals[ui.sheet.k]; (e.extras = e.extras || []).push([id, g]); ui.sheet = ui.sheet.back || { s: 'meal', k: ui.sheet.k }; }
       else { day.extras.push([id, g]); ui.sheet = null; }
       saveDay(ui.date);
     },
